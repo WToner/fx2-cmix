@@ -46,13 +46,20 @@ unsigned long long Predictor::GetNumModels() {
 #ifndef DROP_MIXER_IDX
 #define DROP_MIXER_IDX (-1)
 #endif
+// Bitmask form, for dropping several layer-0 mixers at once. Bit N drops
+// mixer N. 0 disables.
+#ifndef DROP_MIXER_MASK
+#define DROP_MIXER_MASK 0ULL
+#endif
 
 void Predictor::AddMixer(int layer, const unsigned long long& context,
     float learning_rate) {
   learning_rate *= (layer == 0) ? (MIXER_LR_SCALE) : (MIXER_L1_LR_SCALE);
   if (layer == 0) {
     static int layer0_index = 0;
-    if (layer0_index++ == (DROP_MIXER_IDX)) return;
+    const int idx = layer0_index++;
+    if (idx == (DROP_MIXER_IDX)) return;
+    if (((DROP_MIXER_MASK) >> idx) & 1ULL) return;
     mixer_0_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
       learning_rate, mixer_0_.size());
