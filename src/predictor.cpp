@@ -30,16 +30,29 @@ unsigned long long Predictor::GetNumModels() {
   return num;
 }
 
-// Global multiplier on every mixer learning rate, for sweeping the 24 rates
-// set in AddMixers() with one knob. 1.0f leaves the build bit-identical.
+// Multipliers on the mixer learning rates set in AddMixers(), so the 23
+// layer-0 rates and the single layer-1 rate can be swept independently.
+// 1.0f leaves the build bit-identical.
 #ifndef MIXER_LR_SCALE
 #define MIXER_LR_SCALE 1.0f
+#endif
+#ifndef MIXER_L1_LR_SCALE
+#define MIXER_L1_LR_SCALE 1.0f
+#endif
+
+// Ablation: skip the Nth layer-0 mixer (0-based, -1 disables) to measure what
+// each one contributes. Downstream sizes derive from mixer_0_.size(), so
+// dropping one stays self-consistent.
+#ifndef DROP_MIXER_IDX
+#define DROP_MIXER_IDX (-1)
 #endif
 
 void Predictor::AddMixer(int layer, const unsigned long long& context,
     float learning_rate) {
-  learning_rate *= MIXER_LR_SCALE;
+  learning_rate *= (layer == 0) ? (MIXER_LR_SCALE) : (MIXER_L1_LR_SCALE);
   if (layer == 0) {
+    static int layer0_index = 0;
+    if (layer0_index++ == (DROP_MIXER_IDX)) return;
     mixer_0_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
       learning_rate, mixer_0_.size());
