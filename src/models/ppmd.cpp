@@ -30,7 +30,15 @@ typedef unsigned long long qword;
 // This will reduce RAM usage, but will be slower as well. *Warning*: this will
 // write a *lot* of data to disk, so can reduce the lifespan of SSDs. Not
 // recommended for normal usage.
-bool mmap_to_disk = true;
+//
+// Defaults to true to stay inside the Hutter Prize RAM limit. Development
+// builds that only need throughput can compile with -DPPM_MMAP_TO_DISK=0;
+// this changes memory backing only, never the model, so compressed output is
+// bit-identical either way.
+#ifndef PPM_MMAP_TO_DISK
+#define PPM_MMAP_TO_DISK 1
+#endif
+bool mmap_to_disk = PPM_MMAP_TO_DISK;
 qword mmap_size;
 static constexpr char mmap_path[] = "ppm.temp";
 

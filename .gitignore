@@ -6,3 +6,6 @@ progress.log
 run/
 changes.v2
 logs
+ppm.temp
+upx-*/
+upx-*.tar.xz

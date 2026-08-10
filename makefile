@@ -1,4 +1,7 @@
-CC = clang++-17
+# CMIX_CXX is used instead of overriding CC directly: make defines CC=cc as a
+# built-in, so `CC ?= clang++` would never take effect from the environment.
+CMIX_CXX ?= clang++
+CC = $(CMIX_CXX)
 
 ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
