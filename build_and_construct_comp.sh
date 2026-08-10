@@ -48,20 +48,35 @@ fi
 "$PROFDATA" show --version 2>&1 | head -2 || true
 "$UPX" --version | head -1 || true
 
-rm -rf pgo_data
-mkdir -p pgo_data
-
-# building with PGO
 CFLAGS_DEFINES="-DSEED=$SEED -DUPDATE_LIMIT=$UPDATE_LIMIT ${EXTRA_DEFINES:-}"
-make CMIX_CXX="$CMIX_CXX" CFLAGS_DEFINES="$CFLAGS_DEFINES" prof_gen -j
 
-./cmix -c ./prof_input/input ./prof_comp > ./prof_output
-rm ./prof_comp ./prof_output
-"$PROFDATA" merge -output=default.profdata ./pgo_data/*
-mv default.profdata pgo_data/
+if [ "${SKIP_PGO:-0}" = "1" ]; then
+  # Plain -O3 build. Same compressed output, slower binary; useful when the
+  # ~15 min instrumented training run is not worth it.
+  make CMIX_CXX="$CMIX_CXX" CFLAGS_DEFINES="$CFLAGS_DEFINES" cmix -j
+else
+  rm -rf pgo_data
+  mkdir -p pgo_data
 
-make CMIX_CXX="$CMIX_CXX" CFLAGS_DEFINES="$CFLAGS_DEFINES" prof_use -j
-"$UPX" -9 cmix
+  # building with PGO
+  make CMIX_CXX="$CMIX_CXX" CFLAGS_DEFINES="$CFLAGS_DEFINES" prof_gen -j
+
+  ./cmix -c ./prof_input/input ./prof_comp > ./prof_output
+  rm ./prof_comp ./prof_output
+  "$PROFDATA" merge -output=default.profdata ./pgo_data/*
+  mv default.profdata pgo_data/
+
+  make CMIX_CXX="$CMIX_CXX" CFLAGS_DEFINES="$CFLAGS_DEFINES" prof_use -j
+fi
+
+[ "${SKIP_UPX:-0}" = "1" ] || "$UPX" -9 cmix
+
+# The self-extracting archive costs two full cmix runs (~10 min) and is only
+# needed to measure S1 or to run `cmix -e`. Development builds skip it.
+if [ "${SKIP_SELFEXTRACT:-0}" = "1" ]; then
+  echo "SKIP_SELFEXTRACT=1: leaving ./cmix as a standalone binary"
+  exit 0
+fi
 
 # this is a directory where the compressor binary will be placed
 DIR=run
