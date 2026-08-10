@@ -30,8 +30,15 @@ unsigned long long Predictor::GetNumModels() {
   return num;
 }
 
+// Global multiplier on every mixer learning rate, for sweeping the 24 rates
+// set in AddMixers() with one knob. 1.0f leaves the build bit-identical.
+#ifndef MIXER_LR_SCALE
+#define MIXER_LR_SCALE 1.0f
+#endif
+
 void Predictor::AddMixer(int layer, const unsigned long long& context,
     float learning_rate) {
+  learning_rate *= MIXER_LR_SCALE;
   if (layer == 0) {
     mixer_0_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
