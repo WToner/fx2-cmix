@@ -4,8 +4,11 @@ set -euo pipefail
 #SEED="$1"
 #UPDATE_LIMIT="$2"
 
-SEED="923"
-UPDATE_LIMIT="3000"
+# Tuned constants from the submission. Overridable from the environment so a
+# sweep does not need a second -D of the same macro:
+#   UPDATE_LIMIT=6000 ./build_and_construct_comp.sh
+SEED="${SEED:-923}"
+UPDATE_LIMIT="${UPDATE_LIMIT:-3000}"
 
 # Toolchain resolution. Upstream hardcodes clang-17 / llvm-profdata-17 / upx-ucl,
 # which are installed via install_tools/*.sh (those need root). Resolve whatever
