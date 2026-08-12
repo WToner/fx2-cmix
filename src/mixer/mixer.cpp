@@ -9,9 +9,10 @@
 Mixer::Mixer(const std::valarray<float>& inputs,
     const std::valarray<float>& extra_inputs,
     const unsigned long long& context, float learning_rate,
-    unsigned int extra_input_size) : inputs_(inputs),
+    unsigned int extra_input_size, int combine_mode) : inputs_(inputs),
     extra_inputs_vec_(extra_inputs), extra_inputs_size_(extra_input_size),/*extra_inputs_(extra_input_size),*/ p_(0.5),
     learning_rate_(learning_rate), context_(context), /*max_steps_(1),*/ steps_(0),
+    combine_mode_(combine_mode),
     context_base_(inputs.size(), extra_inputs_size_)
     {}
 
@@ -28,17 +29,10 @@ ContextData* Mixer::GetContextData() {
   auto it = context_map_.find(context_); 
   if (context_map_.size() >= limit && it == context_map_.end()) {
     data = &context_base_;
-    // data = context_map_[0xDEADBEEF].get();
-    // if (data == nullptr) {
-    //   context_map_[0xDEADBEEF] = std::unique_ptr<ContextData>(
-    //       new ContextData(inputs_.size(), extra_inputs_.size()));
-    //   data = context_map_[0xDEADBEEF].get();
-    // }
   } else {
     if (it != context_map_.end()) {
       data = &it->second;
     } else {
-      //auto [it, success] = context_map_.emplace(std::piecewise_construct, std::make_tuple(context_), std::make_tuple(inputs_.size(), extra_inputs_.size()));
       auto [it, success] = context_map_.insert({context_, ContextData(inputs_.size(), extra_inputs_size_)});
       data = &it->second;
     }
@@ -49,14 +43,34 @@ ContextData* Mixer::GetContextData() {
 
 float Mixer::Mix() {
   ContextData* data = GetContextData();
+  if (combine_mode_ == 1) {
+    // Softmax over unconstrained weights, then convex combo of stretched inputs.
+    float max_w = data->weights[0];
+    for (size_t i = 1; i < data->weights.size(); ++i) {
+      if (data->weights[i] > max_w) max_w = data->weights[i];
+    }
+    float sum = 0;
+    // Reuse extra_weights as scratch for softmax probs when unused (L1 has size 0);
+    // allocate on stack for generality.
+    std::valarray<float> s(data->weights.size());
+    for (size_t i = 0; i < data->weights.size(); ++i) {
+      s[i] = expf(data->weights[i] - max_w);
+      sum += s[i];
+    }
+    float inv = (sum > 0) ? (1.0f / sum) : 0;
+    float p = 0;
+    for (size_t i = 0; i < data->weights.size(); ++i) {
+      s[i] *= inv;
+      p += s[i] * inputs_[i];
+    }
+    p_ = p;
+    return p_;
+  }
   float p = 0;
   for (int i = 0; i < inputs_.size(); ++i) {
     p += inputs_[i] * data->weights[i];
   }
   p_ = p;
-  // for (unsigned int i = 0; i < extra_inputs_.size(); ++i) {
-  //   extra_inputs_[i] = extra_inputs_vec_[i];
-  // }
   float e = 0;
   for (unsigned int i = 0; i < extra_inputs_size_; ++i) {
     e += extra_inputs_vec_[i] * data->extra_weights[i];
@@ -67,14 +81,28 @@ float Mixer::Mix() {
 
 void Mixer::Perceive(int bit) {
 
-  float decay=0.2f;
-  if ( steps_ < 25000000) {
-      decay = 0.3f;
-      if ( steps_ < 5000000) { 
-          decay = 0.7f;
-          if ( steps_ < 1000000)  
-              decay = 1.0f;
-      }
+#ifndef MIXER_DECAY_FLAT
+#define MIXER_DECAY_FLAT 0
+#endif
+#ifndef MIXER_DECAY_LATE
+#define MIXER_DECAY_LATE 0.2f
+#endif
+#ifndef MIXER_L2_DECAY
+#define MIXER_L2_DECAY 0.0f
+#endif
+
+  float decay = MIXER_DECAY_LATE;
+  if (!(MIXER_DECAY_FLAT)) {
+    if ( steps_ < 25000000) {
+        decay = 0.3f;
+        if ( steps_ < 5000000) { 
+            decay = 0.7f;
+            if ( steps_ < 1000000)  
+                decay = 1.0f;
+        }
+    }
+  } else {
+    decay = 1.0f;
   }
   ++steps_;
    
@@ -87,16 +115,35 @@ void Mixer::Perceive(int bit) {
   if(fabs(update)<(MIXER_SKIP_EPS) && extra_inputs_size_>0) {
       return;
   }
-   // ++data->steps;
   update = decay * update;
   ContextData* data = GetContextData();
-  
-  data->weights -= update * inputs_;
-  data->extra_weights -= update * extra_inputs_vec_[std::slice(0,extra_inputs_size_,1)];
- /*if ((data->steps & 1023) == 0) {
-    data->weights *= 1.0f - 3.0e-6f;
-    data->extra_weights *= 1.0f - 3.0e-6f;
-  }*/
 
+  if (combine_mode_ == 1) {
+    // Gradient through softmax: dp/dw_k = s_k * (x_k - p).
+    float max_w = data->weights[0];
+    for (size_t i = 1; i < data->weights.size(); ++i) {
+      if (data->weights[i] > max_w) max_w = data->weights[i];
+    }
+    float sum = 0;
+    std::valarray<float> s(data->weights.size());
+    for (size_t i = 0; i < data->weights.size(); ++i) {
+      s[i] = expf(data->weights[i] - max_w);
+      sum += s[i];
+    }
+    float inv = (sum > 0) ? (1.0f / sum) : 0;
+    for (size_t i = 0; i < data->weights.size(); ++i) {
+      s[i] *= inv;
+      data->weights[i] -= update * s[i] * (inputs_[i] - p_);
+    }
+  } else {
+    data->weights -= update * inputs_;
+    data->extra_weights -= update * extra_inputs_vec_[std::slice(0,extra_inputs_size_,1)];
+  }
+
+  if ((MIXER_L2_DECAY) > 0.0f && (steps_ & 1023ULL) == 0) {
+    data->weights *= 1.0f - (MIXER_L2_DECAY);
+    if (extra_inputs_size_ > 0) {
+      data->extra_weights *= 1.0f - (MIXER_L2_DECAY);
+    }
+  }
 }
-

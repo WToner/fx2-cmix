@@ -3273,8 +3273,13 @@ void PredictorInit() {
     mxA[10].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
     mxA[11].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
 
+    // FXCM_BIGMAP_SCALE divides the two 256 MB maps (cmC2[1], cmC2[13]).
+    // Default 1 keeps the shipped sizes; 2 halves them to 128 MB each.
+#ifndef FXCM_BIGMAP_SCALE
+#define FXCM_BIGMAP_SCALE 1
+#endif
     cmC2[0].Init( 8*4096*4096,3|(c_r[0]<<8)|(c_s[0]<<16),c_s3[0],&STA6[0][0],c_s4[0],0xf0,1,&st2_p1[0]);
-    cmC2[1].Init(16*4096*4096,1|(c_r[1]<<8)|(c_s[1]<<16),c_s3[1],&STA6[0][0],c_s4[1],0xf0,1,&st2_p1[0]);
+    cmC2[1].Init((16*4096*4096)/(FXCM_BIGMAP_SCALE),1|(c_r[1]<<8)|(c_s[1]<<16),c_s3[1],&STA6[0][0],c_s4[1],0xf0,1,&st2_p1[0]);
     cmC2[2].Init( 8*4096*4096,1|(c_r[2]<<8)|(c_s[2]<<16),c_s3[2],&STA6[0][0],c_s4[2],0xf0,1,&st2_p1[0]);
     cmC2[3].Init( 8*4096*4096,1|(c_r[3]<<8)|(c_s[3]<<16),c_s3[3],&STA6[0][0],c_s4[3],0xf0,1,&st2_p1[0]);
     cmC2[4].Init( 8*4096*4096,2|(c_r[4]<<8)|(c_s[4]<<16),c_s3[4],&STA6[0][0],c_s4[4],0xf0,1,&st2_p1[0]);
@@ -3297,7 +3302,7 @@ void PredictorInit() {
     cmC2[10].Init( 8*4096*4096,6|(c_r[18]<<8)|(c_s[18]<<16),c_s3[18],&STA5[0][0],c_s4[18],0xf0,1,&st2_p1[0]);
     cmC2[11].Init( 8*4096*4096,5|(c_r[19]<<8)|(c_s[19]<<16),c_s3[19],&STA5[0][0],c_s4[19],0xf0,1,&st2_p1[0]);
     cmC2[12].Init( 8*4096*4096,2|(c_r[20]<<8)|(c_s[20]<<16),c_s3[20],&STA6[0][0],c_s4[20],0xf0,1,&st2_p1[0]);
-    cmC2[13].Init(16*4096*4096,2|(c_r[21]<<8)|(c_s[21]<<16),c_s3[21],&STA6[0][0],c_s4[21],0xf0,1,&st2_p1[0]);
+    cmC2[13].Init((16*4096*4096)/(FXCM_BIGMAP_SCALE),2|(c_r[21]<<8)|(c_s[21]<<16),c_s3[21],&STA6[0][0],c_s4[21],0xf0,1,&st2_p1[0]);
 
     cmC[3].Init(     32*4096,2|(c_r[22]<<8)|(c_s[22]<<16),c_s3[22],&STA2[0][0],c_s4[22],0x00,1,&st2_p2[0]);
 

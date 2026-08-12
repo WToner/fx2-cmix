@@ -4,13 +4,45 @@
 #include <stdio.h>
 #include <cstdlib>
 
+#ifndef DROP_CMIX_BRACKET
+#define DROP_CMIX_BRACKET 0
+#endif
+#ifndef DROP_CMIX_WORD
+#define DROP_CMIX_WORD 0
+#endif
+#ifndef DROP_CMIX_MATCH
+#define DROP_CMIX_MATCH 0
+#endif
+#ifndef DROP_CMIX_DIND
+#define DROP_CMIX_DIND 0
+#endif
+// Drop a single Word sparse-Indirect row (0..9) or Match hash row (0..4). -1 disables.
+#ifndef DROP_CMIX_ROW_W
+#define DROP_CMIX_ROW_W (-1)
+#endif
+#ifndef DROP_CMIX_ROW_M
+#define DROP_CMIX_ROW_M (-1)
+#endif
+#ifndef MIXER_NO_EXTRA
+#define MIXER_NO_EXTRA 0
+#endif
+#ifndef MIXER_L1_COMBINE
+#define MIXER_L1_COMBINE 0
+#endif
+#ifndef MIXER_L0_LR_HI
+#define MIXER_L0_LR_HI 1.0f
+#endif
+#ifndef MIXER_L0_LR_LO
+#define MIXER_L0_LR_LO 1.0f
+#endif
+
 Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
     sigmoid_(100001), vocab_(vocab) {
-  AddBracket();
+  if (!(DROP_CMIX_BRACKET)) AddBracket();
   AddPPMD();
-  AddWord();
-  AddMatch();
-  AddDoubleIndirect();
+  if (!(DROP_CMIX_WORD)) AddWord();
+  if (!(DROP_CMIX_MATCH)) AddMatch();
+  if (!(DROP_CMIX_DIND)) AddDoubleIndirect();
   AddMixers();
   auxiliary_size_ = 2;
 }
@@ -18,15 +50,14 @@ Predictor::Predictor(const std::vector<bool>& vocab) : manager_(),
 unsigned long long Predictor::GetNumModels() {
   unsigned long long num = 0;
 
-  // models
-  num += bracket_model_->NumOutputs(); // bracket
+  if (bracket_model_) num += bracket_model_->NumOutputs();
   num += fxcm_model_.NumOutputs();
   num += direct_models_.size();
   num += match_models_.size();
   num += indirect_ns_models_.size();
   num += indirect_r_models_.size();
-  num += byte_model_->NumOutputs();
-  num += byte_mixer_->NumOutputs();
+  if (byte_model_) num += byte_model_->NumOutputs();
+  if (byte_mixer_) num += byte_mixer_->NumOutputs();
   return num;
 }
 
@@ -54,19 +85,27 @@ unsigned long long Predictor::GetNumModels() {
 
 void Predictor::AddMixer(int layer, const unsigned long long& context,
     float learning_rate) {
-  learning_rate *= (layer == 0) ? (MIXER_LR_SCALE) : (MIXER_L1_LR_SCALE);
+  if (layer == 0) {
+    // Scale the two rate clusters independently (0.005 vs 0.0005).
+    if (learning_rate >= 0.004f) learning_rate *= (MIXER_L0_LR_HI);
+    else if (learning_rate <= 0.0006f) learning_rate *= (MIXER_L0_LR_LO);
+    learning_rate *= (MIXER_LR_SCALE);
+  } else {
+    learning_rate *= (MIXER_L1_LR_SCALE);
+  }
   if (layer == 0) {
     static int layer0_index = 0;
     const int idx = layer0_index++;
     if (idx == (DROP_MIXER_IDX)) return;
     if (((DROP_MIXER_MASK) >> idx) & 1ULL) return;
+    unsigned int extra = (MIXER_NO_EXTRA) ? 0u : static_cast<unsigned int>(mixer_0_.size());
     mixer_0_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
-      learning_rate, mixer_0_.size());
+      learning_rate, extra, 0);
   } else {
     mixer_1_.emplace_back(
         layers_[layer].Inputs(), layers_[layer].ExtraInputs(), context,
-      learning_rate, mixer_1_.size());
+      learning_rate, mixer_1_.size(), (MIXER_L1_COMBINE) ? 1 : 0);
   }
 }
 
@@ -97,7 +136,9 @@ void Predictor::AddWord() {
       {2, 3, 4},
        {2}
       };
+  int row = 0;
   for (const auto& params : model_params) {
+    if (row++ == (DROP_CMIX_ROW_W)) continue;
     const Context& context = manager_.AddSparseContext(manager_.words_, params);
     indirect_ns_models_.emplace_back(manager_.nonstationary_, context.GetContext(),
         manager_.bit_context_, delta, manager_.shared_map_);
@@ -132,7 +173,9 @@ void Predictor::AddMatch() {
       {13, 2}, 
   };
 
+  int row = 0;
   for (const auto& params : model_params) {
+    if (row++ == (DROP_CMIX_ROW_M)) continue;
     const Context& context = manager_.AddContextHashContext(manager_.bit_context_,params[0], params[1]);
     match_models_.emplace_back(manager_.history_, context.GetContext(),
         manager_.bit_context_, limit, delta, std::min(max_size, context.Size()),
@@ -196,15 +239,19 @@ void Predictor::AddMixers() {
 
   AddMixer(1,manager_.zero_context_, 0.0003);
 
-  layers_[0].SetExtraInputSize(mixer_0_.size());
+  if (!(MIXER_NO_EXTRA)) {
+    layers_[0].SetExtraInputSize(mixer_0_.size());
+  }
 
 }
 int lstmpr=0, lstmex=0;
 float byte_mixer_output=0.0f;
 float Predictor::Predict() {
   unsigned int input_index = 0;
-  auto bracket_model_output = bracket_model_->Predict()[0];
-  layers_[0].SetInput(input_index++, bracket_model_output);
+  if (bracket_model_) {
+    auto bracket_model_output = bracket_model_->Predict()[0];
+    layers_[0].SetInput(input_index++, bracket_model_output);
+  }
 
   const auto& fxcm_model_outputs = fxcm_model_.Predict();
   for (unsigned int j = 0; j < fxcm_model_outputs.size(); ++j) {
@@ -259,7 +306,9 @@ float Predictor::Predict() {
 
   for (unsigned int i = 0; i < mixer_0_.size(); ++i) {
     float p = mixer_0_[i].Mix();
-    layers_[0].SetExtraInput(i, p);
+    if (!(MIXER_NO_EXTRA)) {
+      layers_[0].SetExtraInput(i, p);
+    }
     layers_[1].SetStretchedInput(i, p);
   }
   layers_[1].SetStretchedInput(mixer_0_.size(), layers_[0].Inputs()[fxcm_model_index]);
@@ -274,7 +323,7 @@ float Predictor::Predict() {
 }
 
 void Predictor::Perceive(int bit) {
-  bracket_model_->Perceive(bit);
+  if (bracket_model_) bracket_model_->Perceive(bit);
 
   for (unsigned int i = 0; i < direct_models_.size(); ++i) {
     direct_models_[i].Perceive(bit);
@@ -307,7 +356,7 @@ void Predictor::Perceive(int bit) {
 
   manager_.UpdateContexts(bit);
   if (byte_update) {
-    bracket_model_->ByteUpdate();
+    if (bracket_model_) bracket_model_->ByteUpdate();
 
     for (unsigned int i = 0; i < direct_models_.size(); ++i) {
       direct_models_[i].ByteUpdate();
@@ -341,7 +390,7 @@ void Predictor::Perceive(int bit) {
 }
 
 void Predictor::Pretrain(int bit) {
-  bracket_model_->Predict();
+  if (bracket_model_) bracket_model_->Predict();
   fxcm_model_.Predict();
     
   for (unsigned int i = 0; i < direct_models_.size(); ++i) {
@@ -358,7 +407,7 @@ void Predictor::Pretrain(int bit) {
   }
 
 
-  bracket_model_->Perceive(bit);
+  if (bracket_model_) bracket_model_->Perceive(bit);
   fxcm_model_.Perceive(bit);
     
   for (unsigned int i = 0; i < direct_models_.size(); ++i) {
@@ -379,7 +428,7 @@ void Predictor::Pretrain(int bit) {
   if (manager_.bit_context_ >= 128) byte_update = true;
   manager_.UpdateContexts(bit);
   if (byte_update) {
-    bracket_model_->ByteUpdate();
+    if (bracket_model_) bracket_model_->ByteUpdate();
 
     for (unsigned int i = 0; i < direct_models_.size(); ++i) {
       direct_models_[i].ByteUpdate();
@@ -396,4 +445,3 @@ void Predictor::Pretrain(int bit) {
     manager_.bit_context_ = 1;
   }
 }
-

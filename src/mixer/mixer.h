@@ -19,9 +19,11 @@ struct ContextData {
 
 class Mixer {
  public:
+  // combine_mode: 0 = unconstrained linear (default), 1 = softmax/convex.
   Mixer(const std::valarray<float>& inputs,
       const std::valarray<float>& extra_inputs, const unsigned long long& context,
-      float learning_rate, unsigned int extra_input_size);
+      float learning_rate, unsigned int extra_input_size,
+      int combine_mode = 0);
   float Mix();
   void Perceive(int bit);
 
@@ -34,6 +36,7 @@ class Mixer {
   float p_, learning_rate_;
   const unsigned long long& context_;
   unsigned long long /*max_steps_,*/ steps_;
+  int combine_mode_;
   emhash6::HashMap<unsigned int, ContextData> context_map_;
   ContextData context_base_;
 };
