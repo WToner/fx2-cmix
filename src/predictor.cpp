@@ -20,8 +20,14 @@
 #ifndef DROP_CMIX_ROW_W
 #define DROP_CMIX_ROW_W (-1)
 #endif
+#ifndef DROP_CMIX_ROW_W_MASK
+#define DROP_CMIX_ROW_W_MASK 0
+#endif
 #ifndef DROP_CMIX_ROW_M
 #define DROP_CMIX_ROW_M (-1)
+#endif
+#ifndef DROP_CMIX_ROW_M_MASK
+#define DROP_CMIX_ROW_M_MASK 0
 #endif
 #ifndef MIXER_NO_EXTRA
 #define MIXER_NO_EXTRA 0
@@ -138,7 +144,9 @@ void Predictor::AddWord() {
       };
   int row = 0;
   for (const auto& params : model_params) {
-    if (row++ == (DROP_CMIX_ROW_W)) continue;
+    const int r = row++;
+    if (r == (DROP_CMIX_ROW_W)) continue;
+    if (((DROP_CMIX_ROW_W_MASK) >> r) & 1) continue;
     const Context& context = manager_.AddSparseContext(manager_.words_, params);
     indirect_ns_models_.emplace_back(manager_.nonstationary_, context.GetContext(),
         manager_.bit_context_, delta, manager_.shared_map_);
@@ -175,7 +183,9 @@ void Predictor::AddMatch() {
 
   int row = 0;
   for (const auto& params : model_params) {
-    if (row++ == (DROP_CMIX_ROW_M)) continue;
+    const int r = row++;
+    if (r == (DROP_CMIX_ROW_M)) continue;
+    if (((DROP_CMIX_ROW_M_MASK) >> r) & 1) continue;
     const Context& context = manager_.AddContextHashContext(manager_.bit_context_,params[0], params[1]);
     match_models_.emplace_back(manager_.history_, context.GetContext(),
         manager_.bit_context_, limit, delta, std::min(max_size, context.Size()),
